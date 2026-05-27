@@ -1,3 +1,11 @@
+streamlit
+geopandas
+networkx
+pandas
+numpy
+pyogrio
+shapely
+
 import streamlit as st
 import geopandas as gpd
 import networkx as nx
