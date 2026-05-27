@@ -1,0 +1,7 @@
+streamlit
+geopandas
+networkx
+pandas
+numpy
+pyogrio
+shapely
