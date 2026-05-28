@@ -18,30 +18,28 @@ OUTPUT_DIR = "Output_Data"
 for folder in [INPUT_DIR, OUTPUT_DIR]:
     os.makedirs(folder, exist_ok=True)
 
-# --- 2. SIDEBAR CONFIGURATION ---
+# --- 2. SIDEBAR CONFIGURATION & FILE UPLOADERS ---
+st.sidebar.header("📁 Upload Catchment Data")
+
+# Using unified file uploaders to make the tool accessible on the public web
+uploaded_river = st.sidebar.file_uploader("Upload OS Water Network Template (.geojson or .gpkg)", type=["geojson", "gpkg"])
+uploaded_inns = st.sidebar.file_uploader("Upload INNS Reports (.gpkg)", type=["gpkg"])
+
+st.sidebar.markdown("---")
 st.sidebar.header("🔧 Analysis Parameters")
-
-available_files = os.listdir(INPUT_DIR) if os.path.exists(INPUT_DIR) else []
-gpkg_files = [f for f in available_files if f.endswith('.gpkg')]
-
-river_file_name = st.sidebar.selectbox("Select OS Water Network File", gpkg_files, index=gpkg_files.index("OS_Water_Network.gpkg") if "OS_Water_Network.gpkg" in gpkg_files else 0)
-inns_file_name = st.sidebar.selectbox("Select INNS Reports File", gpkg_files, index=gpkg_files.index("INNS_Reports.gpkg") if "INNS_Reports.gpkg" in gpkg_files else 0)
-
-RIVER_FILE = os.path.join(INPUT_DIR, river_file_name) if river_file_name else ""
-INNS_FILE = os.path.join(INPUT_DIR, inns_file_name) if inns_file_name else ""
 
 MAX_SEGMENT_LENGTH = st.sidebar.slider("Work Block Size (Meters)", min_value=250, max_value=5000, value=1000, step=250)
 BUFFER_DIST = st.sidebar.slider("INNS Search Buffer (Meters)", min_value=50, max_value=1000, value=250, step=50)
 
-# Load dynamic species options
-base_species_list = []
-if inns_file_name and os.path.exists(INNS_FILE):
+# Load dynamic species options directly from the uploaded file if available
+base_species_list = ["impatiens_glandulifera", "heracleum_mantegazzianum", "fallopia_japonica"]
+if uploaded_inns is not None:
     try:
-        inns_peek = gpd.read_file(INNS_FILE, ignore_geometry=True, engine="pyogrio")
+        inns_peek = gpd.read_file(uploaded_inns, ignore_geometry=True, engine="pyogrio")
         if 'species' in inns_peek.columns:
             base_species_list = sorted(inns_peek['species'].dropna().unique().tolist())
     except Exception:
-        base_species_list = ["impatiens_glandulifera", "heracleum_mantegazzianum", "fallopia_japonica"]
+        pass
 
 species_options = ["All Species (Run Individually)"] + base_species_list
 SPECIES_SELECTION = st.sidebar.selectbox("Species Target", options=species_options, index=0)
@@ -61,14 +59,14 @@ def split_line(line, max_dist):
     return [substring(line, i * segment_length, (i + 1) * segment_length) for i in range(num_segments)]
 
 if run_analysis:
-    if not river_file_name or not inns_file_name:
-        st.error("Please ensure both input GeoPackages are selected.")
+    if not uploaded_river or not uploaded_inns:
+        st.error("Please ensure both spatial layers have been uploaded to the dashboard.")
         st.stop()
 
     with st.spinner("Running high-speed network and spatial calculation..."):
-        # Load datasets
+        # Load datasets dynamically from web memory buffer and force projection to BNG metric system
         rivers_base = gpd.read_file(uploaded_river, engine="pyogrio").to_crs(27700)
-        all_inns = gpd.read_file(INNS_FILE, engine="pyogrio").to_crs(27700)
+        all_inns = gpd.read_file(uploaded_inns, engine="pyogrio").to_crs(27700)
 
         # Segmenting base lines
         segmented_rows = []
@@ -172,8 +170,10 @@ if run_analysis:
         out_filename = f"Strategy_{file_species_string}_{YEAR_FILTER}.gpkg"
         final_output_path = os.path.join(current_output_path, out_filename)
         
+        # Keep background server archive intact
         rivers.to_file(final_output_path, driver="GPKG")
 
+        # Compile in-memory stream for browser deployment
         buffer = io.BytesIO()
         rivers.to_file(buffer, driver="GPKG")
         gpkg_bytes = buffer.getvalue()
@@ -200,12 +200,12 @@ if 'rivers_result' in st.session_state:
         mime="application/geopackage+sqlite3",
         type="primary"
     )
-    st.info(f"📁 Network-wide file archived at: `{st.session_state['file_path']}`")
+    st.info(f"📁 Network-wide file backed up at: `{st.session_state['file_path']}`")
 
     st.markdown("---")
     st.subheader("📊 Individual Species Metrics")
 
-    # Display an analytical summary table for every species executed in the run
+    # Display analytical metrics for every species evaluated in the sequence
     for spec in species_list:
         clean_name = spec.lower().replace(" ", "_")[:15]
         tier_col = f"{clean_name}_tier"
@@ -221,10 +221,14 @@ if 'rivers_result' in st.session_state:
                 st.metric("Critical Clean Protectors", f"{protectors}")
                 
             with col2:
-                summary_df = rivers[tier_col].value_counts().sort_index().reset_index()
-                summary_df.columns = ['Strategic Tier', 'Segments Found']
-                labels = {1: "Priority 1 (Alpha Source)", 2: "Priority 2", 3: "Priority 3", 4: "Priority 4", 5: "Priority 5 (Clean / Out of Scope)"}
-                summary_df['Description'] = summary_df['Strategic Tier'].map(labels)
-                st.table(summary_df[['Strategic Tier', 'Description', 'Segments Found']])
+                # Value counts parsing handles dynamically created columns beautifully
+                if tier_col in rivers.columns:
+                    summary_df = rivers[tier_col].value_counts().sort_index().reset_index()
+                    summary_df.columns = ['Strategic Tier', 'Segments Found']
+                    labels = {1: "Priority 1 (Alpha Source)", 2: "Priority 2", 3: "Priority 3", 4: "Priority 4", 5: "Priority 5 (Clean / Out of Scope)"}
+                    summary_df['Description'] = summary_df['Strategic Tier'].map(labels)
+                    st.table(summary_df[['Strategic Tier', 'Description', 'Segments Found']])
+                else:
+                    st.write("No prioritization records generated for this species target.")
 else:
-    st.info("👈 Use the parameters on the left sidebar and click **Run Strategic Analysis** to generate the data.")
+    st.info("👈 Upload your data source templates using the sidebar panel and click **Run Strategic Analysis**.")
