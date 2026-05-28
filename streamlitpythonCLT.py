@@ -24,7 +24,7 @@ This tool uses hydrological network models to prioritize management blocks for I
 It analyzes up-and-downstream topological relationships to maximize intervention efficiency.
 """)
 
-# --- 2. DIRECTORY SETUP & STATIC PATHS ---
+# --- 1. DIRECTORY SETUP & STATIC PATHS ---
 INPUT_DIR = "Input_Data"
 OUTPUT_DIR = "Output_Data"
 RIVER_TEMPLATE = "Template_Data/OS_Water_Network_Template.zip"
