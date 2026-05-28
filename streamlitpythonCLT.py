@@ -63,8 +63,8 @@ if active_inns_source is not None:
     except Exception:
         pass
 
-species_options = ["All Species (Run Individually)"] + base_species_list
-SPECIES_SELECTION = st.sidebar.selectbox("Species Target Filter", options=species_options, index=0)
+# REMOVED "All Species" option to safeguard container hardware resources
+SPECIES_SELECTION = st.sidebar.selectbox("Species Target Filter", options=base_species_list, index=0)
 
 current_year = datetime.now().year
 YEAR_FILTER = st.sidebar.number_input("Survey Baseline Horizon Year", min_value=2000, max_value=current_year, value=2015, step=1)
@@ -191,10 +191,8 @@ with engine_tab:
         rivers['Fnode'] = rivers['start_node'].astype(str)
         rivers['Tnode'] = rivers['end_node'].astype(str)
 
-        if SPECIES_SELECTION == "All Species (Run Individually)":
-            species_to_run = base_species_list
-        else:
-            species_to_run = [SPECIES_SELECTION]
+        # Configured context cleanly for isolated target runs only
+        species_to_run = [SPECIES_SELECTION]
 
         # --- PHASE D: GENERATE LEAN SPATIAL JOIN CHECKS ---
         progress_bar.progress(60, text="Constructing lateral search buffers...")
@@ -262,7 +260,7 @@ with engine_tab:
         current_output_path = os.path.join(OUTPUT_DIR, run_date)
         os.makedirs(current_output_path, exist_ok=True)
         
-        file_species_string = "Multi_Species" if SPECIES_SELECTION == "All Species (Run Individually)" else SPECIES_SELECTION
+        file_species_string = SPECIES_SELECTION.lower().replace(" ", "_")[:15]
         out_filename = f"Strategy_{file_species_string}_{YEAR_FILTER}.gpkg"
         final_output_path = os.path.join(current_output_path, out_filename)
         
@@ -288,7 +286,6 @@ with engine_tab:
         
         st.success("🎉 Strategic Operational Profiles Generated!")
         
-        # Guide layout for exporting data
         st.subheader("📥 Export Prioritised GIS Vector Data")
         st.markdown("""
         Click the download button below to save your generated model. 
