@@ -67,7 +67,7 @@ if active_inns_source is not None:
 SPECIES_SELECTION = st.sidebar.selectbox("Species Target Filter", options=base_species_list, index=0)
 
 current_year = datetime.now().year
-YEAR_FILTER = st.sidebar.number_input("Survey Baseline Horizon Year", min_value=2000, max_value=current_year, value=2015, step=1)
+YEAR_FILTER = st.sidebar.number_input("Survey Baseline Horizon Year", min_value=2000, max_value=current_year, value=2020, step=1)
 USE_YEAR_RANGE = st.sidebar.checkbox("Include subsequent record entries to present date?", value=True)
 
 st.sidebar.markdown("---")
