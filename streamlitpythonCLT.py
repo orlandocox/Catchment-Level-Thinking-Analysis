@@ -4,6 +4,7 @@ import networkx as nx
 import pandas as pd
 import numpy as np
 import os
+import zipfile
 from datetime import datetime
 from shapely.ops import substring
 import io
@@ -12,18 +13,28 @@ st.set_page_config(page_title="INNS Catchment Strategy Tool", layout="wide")
 st.title("🌊 INNS Catchment Prioritisation & Strategy Tool")
 st.markdown("Use this interface to configure and generate catchment work blocks for GIS deployment.")
 
-# --- 1. DIRECTORY SETUP ---
+# --- 1. DIRECTORY SETUP & STATIC PATHS ---
 INPUT_DIR = "Input_Data"
 OUTPUT_DIR = "Output_Data"
+TEMPLATE_PATH = "Template_Data/OS_Water_Network_Template.zip"
+
 for folder in [INPUT_DIR, OUTPUT_DIR]:
     os.makedirs(folder, exist_ok=True)
 
 # --- 2. SIDEBAR CONFIGURATION & FILE UPLOADERS ---
 st.sidebar.header("📁 Upload Catchment Data")
 
-# Using unified file uploaders to make the tool accessible on the public web
-uploaded_river = st.sidebar.file_uploader("Upload OS Water Network Template (.geojson or .gpkg)", type=["geojson", "gpkg"])
+# Allow custom overrides via file uploaders
+uploaded_river = st.sidebar.file_uploader("Override OS Water Network (.gpkg or .zip)", type=["gpkg", "zip"])
 uploaded_inns = st.sidebar.file_uploader("Upload INNS Reports (.gpkg)", type=["gpkg"])
+
+# Visual status indicator showing which base network is currently targeted
+if uploaded_river is not None:
+    st.sidebar.success(f"🟢 Using uploaded network: `{uploaded_river.name}`")
+elif os.path.exists(TEMPLATE_PATH):
+    st.sidebar.info("🔵 Using default repository template (`OS_Water_Network_Template.zip`)")
+else:
+    st.sidebar.warning("⚠️ No base network uploaded & template not found in `Template_Data/`")
 
 st.sidebar.markdown("---")
 st.sidebar.header("🔧 Analysis Parameters")
@@ -59,13 +70,37 @@ def split_line(line, max_dist):
     return [substring(line, i * segment_length, (i + 1) * segment_length) for i in range(num_segments)]
 
 if run_analysis:
-    if not uploaded_river or not uploaded_inns:
-        st.error("Please ensure both spatial layers have been uploaded to the dashboard.")
+    # Validation step to ensure an INNS file and a valid river layer are present
+    if not uploaded_inns:
+        st.error("Please upload an INNS Reports (.gpkg) file to run the analysis.")
+        st.stop()
+    if not uploaded_river and not os.path.exists(TEMPLATE_PATH):
+        st.error("No base network available. Please upload a file or verify `Template_Data/OS_Water_Network_Template.zip` exists.")
         st.stop()
 
     with st.spinner("Running high-speed network and spatial calculation..."):
-        # Load datasets dynamically from web memory buffer and force projection to BNG metric system
-        rivers_base = gpd.read_file(uploaded_river, engine="pyogrio").to_crs(27700)
+        
+        # --- PHASE A: CHANNEL LOAD ROUTING (UPLOAD VS AUTOMATED TEMPLATE) ---
+        if uploaded_river is not None:
+            # User provided a custom file
+            if uploaded_river.name.endswith('.zip'):
+                with zipfile.ZipFile(uploaded_river) as z:
+                    gpkg_inside = [f for f in z.namelist() if f.endswith('.gpkg')]
+                    if not gpkg_inside:
+                        st.error("The uploaded .zip archive does not contain a valid .gpkg file.")
+                        st.stop()
+                    with z.open(gpkg_inside[0]) as f:
+                        rivers_base = gpd.read_file(f, engine="pyogrio").to_crs(27700)
+            else:
+                rivers_base = gpd.read_file(uploaded_river, engine="pyogrio").to_crs(27700)
+        else:
+            # Fallback automatically to the pre-packaged GitHub template archive
+            with zipfile.ZipFile(TEMPLATE_PATH) as z:
+                gpkg_inside = [f for f in z.namelist() if f.endswith('.gpkg')]
+                with z.open(gpkg_inside[0]) as f:
+                    rivers_base = gpd.read_file(f, engine="pyogrio").to_crs(27700)
+
+        # Load weed dataset normal pipeline 
         all_inns = gpd.read_file(uploaded_inns, engine="pyogrio").to_crs(27700)
 
         # Segmenting base lines
@@ -107,7 +142,6 @@ if run_analysis:
 
         # --- BATCH RUN LOOP ---
         for target_species in species_to_run:
-            # Short clean code names for columns (e.g., "Himalayan Balsam" -> "himalayan_balsam")
             clean_name = target_species.lower().replace(" ", "_")[:15]
             
             count_col = f"{clean_name}_cnt"
@@ -115,7 +149,6 @@ if run_analysis:
             risk_col = f"{clean_name}_risk_km"
             prot_col = f"{clean_name}_protector"
 
-            # Filter for this specific loop
             species_inns = all_inns[all_inns['species'] == target_species].copy()
 
             # Spatial join count
@@ -205,7 +238,6 @@ if 'rivers_result' in st.session_state:
     st.markdown("---")
     st.subheader("📊 Individual Species Metrics")
 
-    # Display analytical metrics for every species evaluated in the sequence
     for spec in species_list:
         clean_name = spec.lower().replace(" ", "_")[:15]
         tier_col = f"{clean_name}_tier"
@@ -215,13 +247,12 @@ if 'rivers_result' in st.session_state:
             col1, col2 = st.columns([1, 2])
             
             with col1:
-                p1_count = len(rivers[rivers[tier_col] == 1])
-                protectors = int(rivers[prot_col].sum())
+                p1_count = len(rivers[rivers[tier_col] == 1]) if tier_col in rivers.columns else 0
+                protectors = int(rivers[prot_col].sum()) if prot_col in rivers.columns else 0
                 st.metric("Priority 1 Alpha Fronts", f"{p1_count}")
                 st.metric("Critical Clean Protectors", f"{protectors}")
                 
             with col2:
-                # Value counts parsing handles dynamically created columns beautifully
                 if tier_col in rivers.columns:
                     summary_df = rivers[tier_col].value_counts().sort_index().reset_index()
                     summary_df.columns = ['Strategic Tier', 'Segments Found']
@@ -231,4 +262,4 @@ if 'rivers_result' in st.session_state:
                 else:
                     st.write("No prioritization records generated for this species target.")
 else:
-    st.info("👈 Upload your data source templates using the sidebar panel and click **Run Strategic Analysis**.")
+    st.info("👈 Upload your weed survey database on the sidebar and click **Run Strategic Analysis**.")
