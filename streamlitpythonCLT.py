@@ -16,7 +16,8 @@ st.markdown("Use this interface to configure and generate catchment work blocks 
 # --- 1. DIRECTORY SETUP & STATIC PATHS ---
 INPUT_DIR = "Input_Data"
 OUTPUT_DIR = "Output_Data"
-TEMPLATE_PATH = "Template_Data/OS_Water_Network_Template.zip"
+RIVER_TEMPLATE = "Template_Data/OS_Water_Network_Template.zip"
+INNS_TEMPLATE = "Template_Data/INNS_Reports.gpkg"
 
 for folder in [INPUT_DIR, OUTPUT_DIR]:
     os.makedirs(folder, exist_ok=True)
@@ -26,15 +27,25 @@ st.sidebar.header("📁 Upload Catchment Data")
 
 # Allow custom overrides via file uploaders
 uploaded_river = st.sidebar.file_uploader("Override OS Water Network (.gpkg or .zip)", type=["gpkg", "zip"])
-uploaded_inns = st.sidebar.file_uploader("Upload INNS Reports (.gpkg)", type=["gpkg"])
+uploaded_inns = st.sidebar.file_uploader("Override INNS Reports (.gpkg)", type=["gpkg"])
 
-# Visual status indicator showing which base network is currently targeted
+# --- Dynamic File Status Indicators ---
+st.sidebar.markdown("### 📊 Active Layers:")
+# River status tracking
 if uploaded_river is not None:
-    st.sidebar.success(f"🟢 Using uploaded network: `{uploaded_river.name}`")
-elif os.path.exists(TEMPLATE_PATH):
-    st.sidebar.info("🔵 Using default repository template (`OS_Water_Network_Template.zip`)")
+    st.sidebar.success(f"🟢 Network: `{uploaded_river.name}` (User)")
+elif os.path.exists(RIVER_TEMPLATE):
+    st.sidebar.info("🔵 Network: Default Repository Zip Template")
 else:
-    st.sidebar.warning("⚠️ No base network uploaded & template not found in `Template_Data/`")
+    st.sidebar.warning("⚠️ Network: Missing (Upload required)")
+
+# INNS status tracking
+if uploaded_inns is not None:
+    st.sidebar.success(f"🟢 INNS Data: `{uploaded_inns.name}` (User)")
+elif os.path.exists(INNS_TEMPLATE):
+    st.sidebar.info("🔵 INNS Data: Default Repository Template")
+else:
+    st.sidebar.warning("⚠️ INNS Data: Missing (Upload required)")
 
 st.sidebar.markdown("---")
 st.sidebar.header("🔧 Analysis Parameters")
@@ -42,11 +53,13 @@ st.sidebar.header("🔧 Analysis Parameters")
 MAX_SEGMENT_LENGTH = st.sidebar.slider("Work Block Size (Meters)", min_value=250, max_value=5000, value=1000, step=250)
 BUFFER_DIST = st.sidebar.slider("INNS Search Buffer (Meters)", min_value=50, max_value=1000, value=250, step=50)
 
-# Load dynamic species options directly from the uploaded file if available
+# Load dynamic species options from the active file reference (User Upload -> Fallback Template -> Safe Default List)
 base_species_list = ["impatiens_glandulifera", "heracleum_mantegazzianum", "fallopia_japonica"]
-if uploaded_inns is not None:
+active_inns_source = uploaded_inns if uploaded_inns is not None else (INNS_TEMPLATE if os.path.exists(INNS_TEMPLATE) else None)
+
+if active_inns_source is not None:
     try:
-        inns_peek = gpd.read_file(uploaded_inns, ignore_geometry=True, engine="pyogrio")
+        inns_peek = gpd.read_file(active_inns_source, ignore_geometry=True, engine="pyogrio")
         if 'species' in inns_peek.columns:
             base_species_list = sorted(inns_peek['species'].dropna().unique().tolist())
     except Exception:
@@ -70,19 +83,18 @@ def split_line(line, max_dist):
     return [substring(line, i * segment_length, (i + 1) * segment_length) for i in range(num_segments)]
 
 if run_analysis:
-    # Validation step to ensure an INNS file and a valid river layer are present
-    if not uploaded_inns:
-        st.error("Please upload an INNS Reports (.gpkg) file to run the analysis.")
+    # Stop execution safely if structural fallback requirements aren't met
+    if not uploaded_river and not os.path.exists(RIVER_TEMPLATE):
+        st.error("Missing critical component: Please upload an OS Water Network file.")
         st.stop()
-    if not uploaded_river and not os.path.exists(TEMPLATE_PATH):
-        st.error("No base network available. Please upload a file or verify `Template_Data/OS_Water_Network_Template.zip` exists.")
+    if not uploaded_inns and not os.path.exists(INNS_TEMPLATE):
+        st.error("Missing critical component: Please upload an INNS Reports (.gpkg) file.")
         st.stop()
 
     with st.spinner("Running high-speed network and spatial calculation..."):
         
-        # --- PHASE A: CHANNEL LOAD ROUTING (UPLOAD VS AUTOMATED TEMPLATE) ---
+        # --- PHASE A: LOADING RIVERS LAYER ---
         if uploaded_river is not None:
-            # User provided a custom file
             if uploaded_river.name.endswith('.zip'):
                 with zipfile.ZipFile(uploaded_river) as z:
                     gpkg_inside = [f for f in z.namelist() if f.endswith('.gpkg')]
@@ -94,14 +106,16 @@ if run_analysis:
             else:
                 rivers_base = gpd.read_file(uploaded_river, engine="pyogrio").to_crs(27700)
         else:
-            # Fallback automatically to the pre-packaged GitHub template archive
-            with zipfile.ZipFile(TEMPLATE_PATH) as z:
+            with zipfile.ZipFile(RIVER_TEMPLATE) as z:
                 gpkg_inside = [f for f in z.namelist() if f.endswith('.gpkg')]
                 with z.open(gpkg_inside[0]) as f:
                     rivers_base = gpd.read_file(f, engine="pyogrio").to_crs(27700)
 
-        # Load weed dataset normal pipeline 
-        all_inns = gpd.read_file(uploaded_inns, engine="pyogrio").to_crs(27700)
+        # --- PHASE B: LOADING INNS LAYER ---
+        if uploaded_inns is not None:
+            all_inns = gpd.read_file(uploaded_inns, engine="pyogrio").to_crs(27700)
+        else:
+            all_inns = gpd.read_file(INNS_TEMPLATE, engine="pyogrio").to_crs(27700)
 
         # Segmenting base lines
         segmented_rows = []
@@ -262,4 +276,4 @@ if 'rivers_result' in st.session_state:
                 else:
                     st.write("No prioritization records generated for this species target.")
 else:
-    st.info("👈 Upload your weed survey database on the sidebar and click **Run Strategic Analysis**.")
+    st.info("👈 Configure target settings in the sidebar panel and click **Run Strategic Analysis**.")
