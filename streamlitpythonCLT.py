@@ -67,7 +67,7 @@ if run_analysis:
 
     with st.spinner("Running high-speed network and spatial calculation..."):
         # Load datasets
-        rivers_base = gpd.read_file(RIVER_FILE, layer='watercourse_link', engine="pyogrio").to_crs(27700)
+        rivers_base = gpd.read_file(uploaded_river, engine="pyogrio").to_crs(27700)
         all_inns = gpd.read_file(INNS_FILE, engine="pyogrio").to_crs(27700)
 
         # Segmenting base lines
