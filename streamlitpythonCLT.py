@@ -73,14 +73,50 @@ USE_YEAR_RANGE = st.sidebar.checkbox("Include subsequent record entries to prese
 st.sidebar.markdown("---")
 run_analysis = st.sidebar.button("🚀 Run Strategic Analysis", type="primary", use_container_width=True)
 
-# --- 4. ACCESSIBLE DASHBOARD DOCUMENTATION WINDOWS ---
-doc_tab, engine_tab = st.tabs(["📖 Understanding the Process", "💻 Analytics Hub"])
+# --- 4. INTERACTIVE DOCUMENTATION & USER MANUAL ---
+doc_tab, engine_tab = st.tabs(["📖 User Manual & Methodology", "💻 Analytics Hub"])
 
 with doc_tab:
-    st.header("Strategic Prioritisation Methodology")
+    st.header("📘 Catchment Thinking Optimization Guide")
     st.markdown("""
-    This application automates the **Top-Down Catchment Management Principal**. Because water transfers reproductive propagules downstream, clearing a point downstream while upstream sources remain infested guarantees reinvasion.
+    Welcome to the **INNS Catchment Strategy Tool**. This system uses directed graph algorithms 
+    to organize invasive species field operations. By evaluating river segments from headwaters to sea, 
+    it identifies exactly where to intervene to stop downstream re-infestation.
     """)
+    
+    with st.expander("🔍 Step 1: Input Data Requirements", expanded=True):
+        st.markdown("""
+        The engine accepts custom GIS files via the sidebar. If none are provided, it automatically falls back to default preloaded datasets. If you use custom overrides, ensure they meet these constraints:
+        * **OS Water Network Link Geometry:** Must be provided in **British National Grid (EPSG:27700)**. The layer requires structural connectivity identifiers, specifically an edge ID (`id`), a starting point node (`start_node`), and a terminating point node (`end_node`).
+        * **INNS Survey Reports:** A spatial GeoPackage (`.gpkg`) layer containing species observation coordinates. The attribute table must contain a text column titled `species` and a temporal column titled `date` (formatted cleanly as `YYYY-MM-DD` or starting with a 4-digit year string).
+        """)
+
+    with st.expander("🎛️ Step 2: Understanding Side Panel Parameters", expanded=False):
+        st.markdown("""
+        Adjusting the sidebar configurations fundamentally shifts how your field operations are grouped and evaluated:
+        1. **Target Work Block Length (meters):** Long, continuous river reaches are split into standardized management stretches. Setting this to `1000m` means a continuous 5km river section will be neatly partitioned into 5 independent operational zones.
+        2. **Buffer Search Envelope (meters):** Survey records rarely snap perfectly to a river centerline due to GPS variance. This parameter builds a temporary lateral buffer around the channel to grab nearby observations. If weeds grow far up the banks, increase this value to ensure they are captured.
+        3. **Survey Horizon Year:** Allows you to isolate recent data. Setting this to `2015` with the subsequent checkbox active will completely ignore historical data from 2014 and older, focusing exclusively on active modern threats.
+        """)
+
+    with st.expander("👑 Step 3: Deciphering Strategic Output Classifications", expanded=False):
+        st.markdown("""
+        When the calculation finishes, every river reach is assigned a management **Tier** from 1 to 5. These tiers indicate how you should prioritize field labor:
+        """)
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown("""
+            * **Tier 1 (Alpha Source):** Reaches containing active target populations with **zero** identified infestations anywhere upstream. **Action item: Treat immediately.** Eradicating these removes the root seed source.
+            * **Tier 2:** Infested reaches with exactly one active cluster located upstream. These are your immediate secondary objectives.
+            * **Tier 3 & 4:** Mid-catchment and terminal channels choked by multiple upstream source populations. Postpone operations here until upstream sources are cleared, as these zones face constant re-infestation pressure.
+            """)
+        with col2:
+            st.markdown("""
+            * **Tier 5 (Clean Corridors):** Safe zones where no target species were found. No remediation action required.
+            * **Critical Clean Protectors:** Clean river reaches located **directly downstream** of an active infestation. These act as your environmental line in the sand—if field teams do not monitor these points, the upstream infestation will soon move into clear water.
+            * **Downstream Risk (km):** The length of continuous uninfested river corridor extending below a Tier 1 source. Reaches with higher numbers should be prioritized first, as clearing them protects a larger downstream area.
+            """)
 
 # --- 5. CORE PROCESSING ENGINE ---
 def split_line(line, max_dist):
@@ -127,7 +163,6 @@ with engine_tab:
         else:
             all_inns = gpd.read_file(INNS_TEMPLATE, engine="pyogrio").to_crs(27700)
 
-        # Filter out records before segmentation to save RAM
         all_inns['year_val'] = pd.to_numeric(all_inns['date'].astype(str).str[:4], errors='coerce')
         if USE_YEAR_RANGE:
             all_inns = all_inns[all_inns['year_val'] >= YEAR_FILTER]
@@ -181,11 +216,10 @@ with engine_tab:
             if not species_inns.empty:
                 joined = gpd.sjoin(river_geom, species_inns, how="left", predicate="intersects")
                 rivers[count_col] = joined.groupby(joined.index).size() - joined.groupby(joined.index)['index_right'].apply(lambda x: x.isnull().sum())
-                del joined # Clear out high-memory intermediate join variables immediately
+                del joined 
             else:
                 rivers[count_col] = 0
 
-            # Build memory-optimized graph network using scalar primitive values
             G = nx.DiGraph()
             for idx, row in rivers.iterrows():
                 G.add_edge(row['Fnode'], row['Tnode'], obj_id=row['UniqueID'], inns=int(row[count_col]), length=float(row.geometry.length))
@@ -219,7 +253,6 @@ with engine_tab:
                 if fn in G and any(data['inns'] > 0 for _, _, data in G.in_edges(fn, data=True)):
                     rivers.at[idx, prot_col] = 1
 
-        # Final cleanup of all buffer data structures before formatting output stream
         del river_geom
         gc.collect()
 
@@ -254,7 +287,13 @@ with engine_tab:
         species_list = st.session_state['species_run_list']
         
         st.success("🎉 Strategic Operational Profiles Generated!")
+        
+        # Guide layout for exporting data
         st.subheader("📥 Export Prioritised GIS Vector Data")
+        st.markdown("""
+        Click the download button below to save your generated model. 
+        Import this `.gpkg` file into desktop software like QGIS or ArcGIS Pro to map out your catchment works.
+        """)
         
         st.download_button(
             label="💾 Download Comprehensive Strategic GeoPackage (.gpkg)",
@@ -263,6 +302,15 @@ with engine_tab:
             mime="application/geopackage+sqlite3",
             type="primary"
         )
+        
+        with st.expander("📝 Attribute Dictionary (How to style your GIS layers)"):
+            st.markdown("""
+            When you open the attribute table of the downloaded GeoPackage, you will find columns dynamically generated for each species run (using the template prefix `[species_name]_...`):
+            * **`_cnt` (Count):** Integer showing the exact number of survey points that intersected this segment.
+            * **`_tier` (Action Priority):** Values from 1 to 5. Style with a categorical color ramp (e.g., Tier 1 as bright red, Tier 5 as light blue) to easily identify your priority targets.
+            * **`_risk_km` (Downstream Risk Value):** Floating point number indicating the kilometers of clean river network lying downstream. Sort descending on this column within Tier 1 reaches to rank your highest-stakes targets.
+            * **`_protector` (Buffer Shield Flag):** Binary switch (`1` or `0`). Filter for rows where this is `1` to highlight clean segments that directly border upstream infestations.
+            """)
 
         st.markdown("---")
         st.subheader("📊 Analytical Performance Metrics by Species")
