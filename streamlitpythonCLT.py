@@ -12,7 +12,7 @@ import gc  # Garbage Collector interface to force-free server RAM
 
 # --- 1. APPLICATION SETUP & THEMING ---
 st.set_page_config(page_title="INNS Catchment Strategy Tool", layout="wide")
-st.title("🌊 INNS Catchment Prioritisation & Strategy Tool")
+st.title("INNS Catchment Prioritisation & Strategy Tool")
 st.markdown("Use this interface to configure and generate catchment work blocks for GIS deployment.")
 
 # --- 2. DIRECTORY SETUP & STATIC PATHS ---
@@ -25,25 +25,25 @@ for folder in [INPUT_DIR, OUTPUT_DIR]:
     os.makedirs(folder, exist_ok=True)
 
 # --- 3. SIDEBAR CONFIGURATION (INPUT PANEL) ---
-st.sidebar.header("📁 1. Data Ingestion")
+st.sidebar.header("1. Data Ingestion")
 
 uploaded_river = st.sidebar.file_uploader("Override OS Water Network (.gpkg or .zip)", type=["gpkg", "zip"])
 uploaded_inns = st.sidebar.file_uploader("Override INNS Reports (.gpkg)", type=["gpkg"])
 
-st.sidebar.markdown("### 🔍 Active Layer Status")
+st.sidebar.markdown("### Active Layer Status")
 if uploaded_river is not None:
-    st.sidebar.success("🟢 Network: Custom File Uploaded")
+    st.sidebar.success("Network: Custom File Uploaded")
 elif os.path.exists(RIVER_TEMPLATE):
-    st.sidebar.info("🔵 Network: Using Default Repository Template")
+    st.sidebar.info("Network: Using Default Repository Template")
 else:
-    st.sidebar.warning("⚠️ Network: Missing Base Framework")
+    st.sidebar.warning("Network: Missing Base Framework")
 
 if uploaded_inns is not None:
-    st.sidebar.success("🟢 INNS Data: Custom File Uploaded")
+    st.sidebar.success("INNS Data: Custom File Uploaded")
 elif os.path.exists(INNS_TEMPLATE):
     st.sidebar.info("🔵 INNS Data: Using Default Repository Template")
 else:
-    st.sidebar.warning("⚠️ INNS Data: Missing Survey Information")
+    st.sidebar.warning("INNS Data: Missing Survey Information")
 
 st.sidebar.markdown("---")
 st.sidebar.header("🔧 2. Strategy Tuners")
@@ -71,27 +71,27 @@ YEAR_FILTER = st.sidebar.number_input("Survey Baseline Horizon Year", min_value=
 USE_YEAR_RANGE = st.sidebar.checkbox("Include subsequent record entries to present date?", value=True)
 
 st.sidebar.markdown("---")
-run_analysis = st.sidebar.button("🚀 Run Strategic Analysis", type="primary", use_container_width=True)
+run_analysis = st.sidebar.button("Run Strategic Analysis", type="primary", use_container_width=True)
 
 # --- 4. INTERACTIVE DOCUMENTATION & USER MANUAL ---
-doc_tab, engine_tab = st.tabs(["📖 User Manual & Methodology", "💻 Analytics Hub"])
+doc_tab, engine_tab = st.tabs(["User Manual & Methodology", "Analytics Hub"])
 
 with doc_tab:
-    st.header("📘 Catchment Thinking Optimization Guide")
+    st.header("Catchment Thinking Optimization Guide")
     st.markdown("""
     Welcome to the **INNS Catchment Strategy Tool**. This system uses directed graph algorithms 
     to organize invasive species field operations. By evaluating river segments from headwaters to sea, 
     it identifies exactly where to intervene to stop downstream re-infestation.
     """)
     
-    with st.expander("🔍 Step 1: Input Data Requirements", expanded=True):
+    with st.expander("Step 1: Input Data Requirements", expanded=True):
         st.markdown("""
         The engine accepts custom GIS files via the sidebar. If none are provided, it automatically falls back to default preloaded datasets. If you use custom overrides, ensure they meet these constraints:
         * **OS Water Network Link Geometry:** Must be provided in **British National Grid (EPSG:27700)**. The layer requires structural connectivity identifiers, specifically an edge ID (`id`), a starting point node (`start_node`), and a terminating point node (`end_node`).
         * **INNS Survey Reports:** A spatial GeoPackage (`.gpkg`) layer containing species observation coordinates. The attribute table must contain a text column titled `species` and a temporal column titled `date` (formatted cleanly as `YYYY-MM-DD` or starting with a 4-digit year string).
         """)
 
-    with st.expander("🎛️ Step 2: Understanding Side Panel Parameters", expanded=False):
+    with st.expander("Step 2: Understanding Side Panel Parameters", expanded=False):
         st.markdown("""
         Adjusting the sidebar configurations fundamentally shifts how your field operations are grouped and evaluated:
         1. **Target Work Block Length (meters):** Long, continuous river reaches are split into standardized management stretches. Setting this to `1000m` means a continuous 5km river section will be neatly partitioned into 5 independent operational zones.
@@ -99,7 +99,7 @@ with doc_tab:
         3. **Survey Horizon Year:** Allows you to isolate recent data. Setting this to `2015` with the subsequent checkbox active will completely ignore historical data from 2014 and older, focusing exclusively on active modern threats.
         """)
 
-    with st.expander("👑 Step 3: Deciphering Strategic Output Classifications", expanded=False):
+    with st.expander("Step 3: Deciphering Strategic Output Classifications", expanded=False):
         st.markdown("""
         When the calculation finishes, every river reach is assigned a management **Tier** from 1 to 5. These tiers indicate how you should prioritize field labor:
         """)
@@ -284,23 +284,23 @@ with engine_tab:
         rivers = st.session_state['rivers_result']
         species_list = st.session_state['species_run_list']
         
-        st.success("🎉 Strategic Operational Profiles Generated!")
+        st.success("Strategic Operational Profiles Generated!")
         
-        st.subheader("📥 Export Prioritised GIS Vector Data")
+        st.subheader("Export Prioritised GIS Vector Data")
         st.markdown("""
         Click the download button below to save your generated model. 
         Import this `.gpkg` file into desktop software like QGIS or ArcGIS Pro to map out your catchment works.
         """)
         
         st.download_button(
-            label="💾 Download Comprehensive Strategic GeoPackage (.gpkg)",
+            label="Download Comprehensive Strategic GeoPackage (.gpkg)",
             data=st.session_state['download_bytes'],
             file_name=st.session_state['file_name'],
             mime="application/geopackage+sqlite3",
             type="primary"
         )
         
-        with st.expander("📝 Attribute Dictionary (How to style your GIS layers)"):
+        with st.expander("Attribute Dictionary (How to style your GIS layers)"):
             st.markdown("""
             When you open the attribute table of the downloaded GeoPackage, you will find columns dynamically generated for each species run (using the template prefix `[species_name]_...`):
             * **`_cnt` (Count):** Integer showing the exact number of survey points that intersected this segment.
@@ -310,14 +310,14 @@ with engine_tab:
             """)
 
         st.markdown("---")
-        st.subheader("📊 Analytical Performance Metrics by Species")
+        st.subheader("Analytical Performance Metrics by Species")
 
         for spec in species_list:
             clean_name = spec.lower().replace(" ", "_")[:15]
             tier_col = f"{clean_name}_tier"
             prot_col = f"{clean_name}_protector"
             
-            with st.expander(f"👁️ View Strategic Summary Metrics: {spec.upper()}", expanded=True):
+            with st.expander(f"View Strategic Summary Metrics: {spec.upper()}", expanded=True):
                 col1, col2 = st.columns([1, 2])
                 
                 with col1:
@@ -340,4 +340,4 @@ with engine_tab:
                         summary_df['Description / Action Items'] = summary_df['Strategic Tier'].map(labels)
                         st.table(summary_df[['Strategic Tier', 'Description / Action Items', 'Segments Found']])
     else:
-        st.info("👈 Set structural layer limits in the left input configurations sidebar panel and click **Run Strategic Analysis**.")
+        st.info("Set structural layer limits in the left input configurations sidebar panel and click **Run Strategic Analysis**.")
