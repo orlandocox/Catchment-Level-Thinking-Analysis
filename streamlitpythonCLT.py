@@ -41,7 +41,7 @@ else:
 if uploaded_inns is not None:
     st.sidebar.success("INNS Data: Custom File Uploaded")
 elif os.path.exists(INNS_TEMPLATE):
-    st.sidebar.info("🔵 INNS Data: Using Default Repository Template")
+    st.sidebar.info("INNS Data: Using Default Repository Template")
 else:
     st.sidebar.warning("INNS Data: Missing Survey Information")
 
