@@ -28,7 +28,8 @@ for folder in [INPUT_DIR, OUTPUT_DIR]:
 st.sidebar.header("1. Data Ingestion")
 
 uploaded_river = st.sidebar.file_uploader("Override OS Water Network (.gpkg or .zip)", type=["gpkg", "zip"])
-uploaded_inns = st.sidebar.file_uploader("Override INNS Reports (.gpkg)", type=["gpkg"])
+# Change this line in your sidebar
+uploaded_inns = st.sidebar.file_uploader("Upload INNS Reports (Select all 3 files: .shp, .dbf, .shx)", type=["shp", "dbf", "shx", "gpkg"], accept_multiple_files=True)
 
 st.sidebar.markdown("### Active Layer Status")
 if uploaded_river is not None:
@@ -157,17 +158,37 @@ with engine_tab:
                 rivers_base = gpd.read_file(RIVER_TEMPLATE, engine="pyogrio").to_crs(27700)
 
         # --- PHASE B: INNS RECORD PROCESSING ---
-        progress_bar.progress(30, text="Parsing environmental spatial records database...")
+# --- PHASE B: MULTI-FILE INNS RECORD PROCESSING ---
+        progress_bar.progress(30, text="Merging multiple INNS spatial layers...")
+        
+        # This handles a list of uploaded files from a single multi-select uploader
         if uploaded_inns is not None:
-            all_inns = gpd.read_file(uploaded_inns, engine="pyogrio").to_crs(27700)
+            # If user uploads multiple files
+            files = uploaded_inns if isinstance(uploaded_inns, list) else [uploaded_inns]
+            gdfs = []
+            for f in files:
+                gdf = gpd.read_file(f, engine="pyogrio").to_crs(27700)
+                gdfs.append(gdf)
+            raw_inns = pd.concat(gdfs, ignore_index=True)
         else:
-            all_inns = gpd.read_file(INNS_TEMPLATE, engine="pyogrio").to_crs(27700)
+            raw_inns = gpd.read_file(INNS_TEMPLATE, engine="pyogrio").to_crs(27700)
 
-        all_inns['year_val'] = pd.to_numeric(all_inns['date'].astype(str).str[:4], errors='coerce')
-        if USE_YEAR_RANGE:
-            all_inns = all_inns[all_inns['year_val'] >= YEAR_FILTER]
-        else:
-            all_inns = all_inns[all_inns['year_val'] == YEAR_FILTER]
+        # Standardize column naming
+        raw_inns.columns = map(str.lower, raw_inns.columns)
+        
+        # Map species and date columns dynamically
+        species_col = next((c for c in ['species', 'common_name', 'taxon'] if c in raw_inns.columns), None)
+        date_col = next((c for c in ['date', 'year', 'date_rec'] if c in raw_inns.columns), None)
+
+        raw_inns = raw_inns.rename(columns={species_col: 'species'})
+        raw_inns['year_val'] = pd.to_numeric(raw_inns[date_col].astype(str).str[:4], errors='coerce') if date_col else YEAR_FILTER
+
+        # Filter and cleanup
+        all_inns = raw_inns[(raw_inns['year_val'] >= YEAR_FILTER if USE_YEAR_RANGE else raw_inns['year_val'] == YEAR_FILTER)].copy()
+        all_inns = all_inns[['species', 'geometry']]
+        
+        del raw_inns
+        gc.collect()
 
         # --- PHASE C: DYNAMIC LINE SEGMENTATION ---
         progress_bar.progress(45, text="Sub-dividing river chains into operational work blocks...")
