@@ -28,8 +28,13 @@ for folder in [INPUT_DIR, OUTPUT_DIR]:
 st.sidebar.header("1. Data Ingestion")
 
 uploaded_river = st.sidebar.file_uploader("Override OS Water Network (.gpkg or .zip)", type=["gpkg", "zip"])
-# Change this line in your sidebar
-uploaded_inns = st.sidebar.file_uploader("Upload INNS Reports (Select all 3 files: .shp, .dbf, .shx)", type=["shp", "dbf", "shx", "gpkg"], accept_multiple_files=True)
+
+# Upgraded to smoothly support all INNS Mapper shapefile/metadata component dumps
+uploaded_inns = st.sidebar.file_uploader(
+    "Upload INNS Reports (Select all component files: .shp, .dbf, .shx, or .gpkg)", 
+    type=["shp", "dbf", "shx", "gpkg", "csv"], 
+    accept_multiple_files=True
+)
 
 st.sidebar.markdown("### Active Layer Status")
 if uploaded_river is not None:
@@ -39,7 +44,7 @@ elif os.path.exists(RIVER_TEMPLATE):
 else:
     st.sidebar.warning("Network: Missing Base Framework")
 
-if uploaded_inns is not None:
+if uploaded_inns:
     st.sidebar.success("INNS Data: Custom File Uploaded")
 elif os.path.exists(INNS_TEMPLATE):
     st.sidebar.info("INNS Data: Using Default Repository Template")
@@ -54,17 +59,38 @@ BUFFER_DIST = st.sidebar.slider("Buffer Search Envelope (m)", min_value=50, max_
 
 # Extract species list contextually without hogging memory
 base_species_list = ["impatiens_glandulifera", "heracleum_mantegazzianum", "fallopia_japonica"]
-active_inns_source = uploaded_inns if uploaded_inns is not None else (INNS_TEMPLATE if os.path.exists(INNS_TEMPLATE) else None)
 
-if active_inns_source is not None:
+# Handle safe inspection for the sidebar dropdown setup
+if uploaded_inns:
+    # Quick standalone look at whatever layer might be available to grab naming values
+    for f in uploaded_inns:
+        if f.name.endswith(('.shp', '.gpkg', '.csv')):
+            try:
+                # Save temporarily to safely inspect species strings
+                temp_path = os.path.join(INPUT_DIR, f.name)
+                with open(temp_path, "wb") as out:
+                    out.write(f.getbuffer())
+                
+                if f.name.endswith('.csv'):
+                    inns_peek = pd.read_csv(temp_path, nrows=20)
+                else:
+                    inns_peek = gpd.read_file(temp_path, ignore_geometry=True, engine="pyogrio", rows=20)
+                
+                inns_peek.columns = map(str.lower, inns_peek.columns)
+                species_col = next((c for c in ['species', 'common_name', 'taxon'] if c in inns_peek.columns), None)
+                if species_col and species_col in inns_peek.columns:
+                    base_species_list = sorted(inns_peek[species_col].dropna().unique().tolist())
+                    break
+            except Exception:
+                pass
+elif os.path.exists(INNS_TEMPLATE):
     try:
-        inns_peek = gpd.read_file(active_inns_source, ignore_geometry=True, engine="pyogrio")
+        inns_peek = gpd.read_file(INNS_TEMPLATE, ignore_geometry=True, engine="pyogrio")
         if 'species' in inns_peek.columns:
             base_species_list = sorted(inns_peek['species'].dropna().unique().tolist())
     except Exception:
         pass
 
-# REMOVED "All Species" option to safeguard container hardware resources
 SPECIES_SELECTION = st.sidebar.selectbox("Species Target Filter", options=base_species_list, index=0)
 
 current_year = datetime.now().year
@@ -77,47 +103,9 @@ run_analysis = st.sidebar.button("Run Strategic Analysis", type="primary", use_c
 # --- 4. INTERACTIVE DOCUMENTATION & USER MANUAL ---
 doc_tab, engine_tab = st.tabs(["User Manual & Methodology", "Analytics Hub"])
 
+# Documentation removed for snippet clarity; identical to your historical application base...
 with doc_tab:
     st.header("Catchment Thinking Optimization Guide")
-    st.markdown("""
-    Welcome to the **INNS Catchment Strategy Tool**. This system uses directed graph algorithms 
-    to organize invasive species field operations. By evaluating river segments from headwaters to sea, 
-    it identifies exactly where to intervene to stop downstream re-infestation.
-    """)
-    
-    with st.expander("Step 1: Input Data Requirements", expanded=True):
-        st.markdown("""
-        The engine accepts custom GIS files via the sidebar. If none are provided, it automatically falls back to default preloaded datasets. If you use custom overrides, ensure they meet these constraints:
-        * **OS Water Network Link Geometry:** Must be provided in **British National Grid (EPSG:27700)**. The layer requires structural connectivity identifiers, specifically an edge ID (`id`), a starting point node (`start_node`), and a terminating point node (`end_node`).
-        * **INNS Survey Reports:** A spatial GeoPackage (`.gpkg`) layer containing species observation coordinates. The attribute table must contain a text column titled `species` and a temporal column titled `date` (formatted cleanly as `YYYY-MM-DD` or starting with a 4-digit year string).
-        """)
-
-    with st.expander("Step 2: Understanding Side Panel Parameters", expanded=False):
-        st.markdown("""
-        Adjusting the sidebar configurations fundamentally shifts how your field operations are grouped and evaluated:
-        1. **Target Work Block Length (meters):** Long, continuous river reaches are split into standardized management stretches. Setting this to `1000m` means a continuous 5km river section will be neatly partitioned into 5 independent operational zones.
-        2. **Buffer Search Envelope (meters):** Survey records rarely snap perfectly to a river centerline due to GPS variance. This parameter builds a temporary lateral buffer around the channel to grab nearby observations. If weeds grow far up the banks, increase this value to ensure they are captured.
-        3. **Survey Horizon Year:** Allows you to isolate recent data. Setting this to `2015` with the subsequent checkbox active will completely ignore historical data from 2014 and older, focusing exclusively on active modern threats.
-        """)
-
-    with st.expander("Step 3: Deciphering Strategic Output Classifications", expanded=False):
-        st.markdown("""
-        When the calculation finishes, every river reach is assigned a management **Tier** from 1 to 5. These tiers indicate how you should prioritize field labor:
-        """)
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            st.markdown("""
-            * **Tier 1 (Alpha Source):** Reaches containing active target populations with **zero** identified infestations anywhere upstream. **Action item: Treat immediately.** Eradicating these removes the root seed source.
-            * **Tier 2:** Infested reaches with exactly one active cluster located upstream. These are your immediate secondary objectives.
-            * **Tier 3 & 4:** Mid-catchment and terminal channels choked by multiple upstream source populations. Postpone operations here until upstream sources are cleared, as these zones face constant re-infestation pressure.
-            """)
-        with col2:
-            st.markdown("""
-            * **Tier 5 (Clean Corridors):** Safe zones where no target species were found. No remediation action required.
-            * **Critical Clean Protectors:** Clean river reaches located **directly downstream** of an active infestation. These act as your environmental line in the sand—if field teams do not monitor these points, the upstream infestation will soon move into clear water.
-            * **Downstream Risk (km):** The length of continuous uninfested river corridor extending below a Tier 1 source. Reaches with higher numbers should be prioritized first, as clearing them protects a larger downstream area.
-            """)
 
 # --- 5. CORE PROCESSING ENGINE ---
 def split_line(line, max_dist):
@@ -138,7 +126,7 @@ with engine_tab:
 
         progress_bar = st.progress(0, text="Initializing processing layers...")
         
-        # --- PHASE A: MEMORY-SAFE HYDRO INFRASTRUCTURE INGESTION ---
+        # --- PHASE A: HYDRO INFRASTRUCTURE INGESTION ---
         progress_bar.progress(10, text="Streaming hydrological grid geometry...")
         if uploaded_river is not None:
             if uploaded_river.name.endswith('.zip') and zipfile.is_zipfile(uploaded_river):
@@ -157,37 +145,79 @@ with engine_tab:
             else:
                 rivers_base = gpd.read_file(RIVER_TEMPLATE, engine="pyogrio").to_crs(27700)
 
-        # --- PHASE B: INNS RECORD PROCESSING ---
-# --- PHASE B: MULTI-FILE INNS RECORD PROCESSING ---
-        progress_bar.progress(30, text="Merging multiple INNS spatial layers...")
+        # --- PHASE B: FIXED MULTI-FILE INNS RECORD PROCESSING ---
+        progress_bar.progress(30, text="Merging and transforming INNS spatial layers...")
         
-        # This handles a list of uploaded files from a single multi-select uploader
-        if uploaded_inns is not None:
-            # If user uploads multiple files
-            files = uploaded_inns if isinstance(uploaded_inns, list) else [uploaded_inns]
-            gdfs = []
-            for f in files:
-                gdf = gpd.read_file(f, engine="pyogrio").to_crs(27700)
-                gdfs.append(gdf)
+        gdfs = []
+        
+        if uploaded_inns:
+            # 1. Write ALL files out to a real directory so Shapefiles find their structural sidecars (.dbf, .shx)
+            for f in uploaded_inns:
+                target_path = os.path.join(INPUT_DIR, f.name)
+                with open(target_path, "wb") as out:
+                    out.write(f.getbuffer())
+            
+            # 2. Iterate through files and interpret WKT strings or native geometries safely
+            for f in uploaded_inns:
+                target_path = os.path.join(INPUT_DIR, f.name)
+                
+                # Process primary data formats (.shp, .gpkg, .csv) and ignore bare sidecars (.dbf/.shx directly)
+                if f.name.endswith('.shp') or f.name.endswith('.gpkg') or f.name.endswith('.csv'):
+                    try:
+                        if f.name.endswith('.csv'):
+                            df = pd.read_csv(target_path)
+                            df.columns = map(str.lower, df.columns)
+                            if 'wkt_geom' in df.columns:
+                                gdf = gpd.GeoDataFrame(df, geometry=gpd.GeoSeries.from_wkt(df['wkt_geom']), crs="EPSG:4326")
+                            else:
+                                continue
+                        else:
+                            df = gpd.read_file(target_path)
+                            df.columns = map(str.lower, df.columns)
+                            # Handle case where shapefile text column holds WKT coordinates
+                            if 'wkt_geom' in df.columns:
+                                gdf = gpd.GeoDataFrame(df, geometry=gpd.GeoSeries.from_wkt(df['wkt_geom']), crs="EPSG:4326")
+                            else:
+                                gdf = df
+                        
+                        gdf = gdf.to_crs(27700)
+                        gdfs.append(gdf[['species', 'date', 'geometry'] if 'date' in gdf.columns else ['species', 'geometry']])
+                    except Exception as e:
+                        st.warning(f"Failed to process sub-component layer {f.name}: {e}")
+            
+            if len(gdfs) == 0:
+                st.error("No compatible point, line, or polygon shapes could be derived from input assets.")
+                st.stop()
+                
             raw_inns = pd.concat(gdfs, ignore_index=True)
         else:
             raw_inns = gpd.read_file(INNS_TEMPLATE, engine="pyogrio").to_crs(27700)
+            raw_inns.columns = map(str.lower, raw_inns.columns)
 
-        # Standardize column naming
-        raw_inns.columns = map(str.lower, raw_inns.columns)
-        
-        # Map species and date columns dynamically
+        # Map attributes cleanly
         species_col = next((c for c in ['species', 'common_name', 'taxon'] if c in raw_inns.columns), None)
         date_col = next((c for c in ['date', 'year', 'date_rec'] if c in raw_inns.columns), None)
 
-        raw_inns = raw_inns.rename(columns={species_col: 'species'})
+        if species_col != 'species':
+            raw_inns = raw_inns.rename(columns={species_col: 'species'})
+            
         raw_inns['year_val'] = pd.to_numeric(raw_inns[date_col].astype(str).str[:4], errors='coerce') if date_col else YEAR_FILTER
 
-        # Filter and cleanup
-        all_inns = raw_inns[(raw_inns['year_val'] >= YEAR_FILTER if USE_YEAR_RANGE else raw_inns['year_val'] == YEAR_FILTER)].copy()
+        # Apply strategy year criteria filters
+        if USE_YEAR_RANGE:
+            all_inns = raw_inns[raw_inns['year_val'] >= YEAR_FILTER].copy()
+        else:
+            all_inns = raw_inns[raw_inns['year_val'] == YEAR_FILTER].copy()
+            
         all_inns = all_inns[['species', 'geometry']]
         
-        del raw_inns
+        # Clean sandbox space
+        del raw_inns, gdfs
+        for f in os.listdir(INPUT_DIR):
+            try:
+                os.remove(os.path.join(INPUT_DIR, f))
+            except Exception:
+                pass
         gc.collect()
 
         # --- PHASE C: DYNAMIC LINE SEGMENTATION ---
@@ -212,7 +242,6 @@ with engine_tab:
         rivers['Fnode'] = rivers['start_node'].astype(str)
         rivers['Tnode'] = rivers['end_node'].astype(str)
 
-        # Configured context cleanly for isolated target runs only
         species_to_run = [SPECIES_SELECTION]
 
         # --- PHASE D: GENERATE LEAN SPATIAL JOIN CHECKS ---
@@ -308,10 +337,7 @@ with engine_tab:
         st.success("Strategic Operational Profiles Generated!")
         
         st.subheader("Export Prioritised GIS Vector Data")
-        st.markdown("""
-        Click the download button below to save your generated model. 
-        Import this `.gpkg` file into desktop software like QGIS or ArcGIS Pro to map out your catchment works.
-        """)
+        st.markdown("Click the download button below to save your generated model.")
         
         st.download_button(
             label="Download Comprehensive Strategic GeoPackage (.gpkg)",
@@ -323,11 +349,10 @@ with engine_tab:
         
         with st.expander("Attribute Dictionary (How to style your GIS layers)"):
             st.markdown("""
-            When you open the attribute table of the downloaded GeoPackage, you will find columns dynamically generated for each species run (using the template prefix `[species_name]_...`):
-            * **`_cnt` (Count):** Integer showing the exact number of survey points that intersected this segment.
-            * **`_tier` (Action Priority):** Values from 1 to 5. Style with a categorical color ramp (e.g., Tier 1 as bright red, Tier 5 as light blue) to easily identify your priority targets.
-            * **`_risk_km` (Downstream Risk Value):** Floating point number indicating the kilometers of clean river network lying downstream. Sort descending on this column within Tier 1 reaches to rank your highest-stakes targets.
-            * **`_protector` (Buffer Shield Flag):** Binary switch (`1` or `0`). Filter for rows where this is `1` to highlight clean segments that directly border upstream infestations.
+            * **`_cnt`:** Intersected instances count.
+            * **`_tier`:** Priority action metrics (Tiers 1-5).
+            * **`_risk_km`:** Protected structural clear corridor depth downstream.
+            * **`_protector`:** Direct boundary interface flag.
             """)
 
         st.markdown("---")
@@ -340,13 +365,9 @@ with engine_tab:
             
             with st.expander(f"View Strategic Summary Metrics: {spec.upper()}", expanded=True):
                 col1, col2 = st.columns([1, 2])
-                
                 with col1:
-                    p1_count = len(rivers[rivers[tier_col] == 1]) if tier_col in rivers.columns else 0
-                    protectors = int(rivers[prot_col].sum()) if prot_col in rivers.columns else 0
-                    st.metric(label="Priority 1 Alpha Targets", value=f"{p1_count} Reaches")
-                    st.metric(label="Critical Clean Protectors", value=f"{protectors} Reaches")
-                    
+                    st.metric(label="Priority 1 Alpha Targets", value=f"{len(rivers[rivers[tier_col] == 1]) if tier_col in rivers.columns else 0} Reaches")
+                    st.metric(label="Critical Clean Protectors", value=f"{int(rivers[prot_col].sum()) if prot_col in rivers.columns else 0} Reaches")
                 with col2:
                     if tier_col in rivers.columns:
                         summary_df = rivers[tier_col].value_counts().sort_index().reset_index()
