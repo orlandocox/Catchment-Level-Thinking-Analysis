@@ -145,45 +145,57 @@ with engine_tab:
             else:
                 rivers_base = gpd.read_file(RIVER_TEMPLATE, engine="pyogrio").to_crs(27700)
 
-        # --- PHASE B: FIXED MULTI-FILE INNS RECORD PROCESSING ---
+# --- PHASE B: FIXED MULTI-FILE INNS RECORD PROCESSING ---
         progress_bar.progress(30, text="Merging and transforming INNS spatial layers...")
         
         gdfs = []
         
         if uploaded_inns:
-            # 1. Write ALL files out to a real directory so Shapefiles find their structural sidecars (.dbf, .shx)
+            # 1. Clean filenames by swapping middle dots with underscores so GDAL can link sidecars
+            cleaned_files = {}
             for f in uploaded_inns:
-                target_path = os.path.join(INPUT_DIR, f.name)
+                base_name, ext = os.path.splitext(f.name)
+                # If there are dots in the base name (e.g., "features.polygon"), replace them
+                safe_base_name = base_name.replace('.', '_')
+                safe_name = f"{safe_base_name}{ext}"
+                
+                target_path = os.path.join(INPUT_DIR, safe_name)
                 with open(target_path, "wb") as out:
                     out.write(f.getbuffer())
-            
-            # 2. Iterate through files and interpret WKT strings or native geometries safely
-            for f in uploaded_inns:
-                target_path = os.path.join(INPUT_DIR, f.name)
                 
-                # Process primary data formats (.shp, .gpkg, .csv) and ignore bare sidecars (.dbf/.shx directly)
-                if f.name.endswith('.shp') or f.name.endswith('.gpkg') or f.name.endswith('.csv'):
-                    try:
-                        if f.name.endswith('.csv'):
-                            df = pd.read_csv(target_path)
-                            df.columns = map(str.lower, df.columns)
-                            if 'wkt_geom' in df.columns:
-                                gdf = gpd.GeoDataFrame(df, geometry=gpd.GeoSeries.from_wkt(df['wkt_geom']), crs="EPSG:4326")
-                            else:
-                                continue
+                # Keep track of the main spatial files we actually want to loop over and read
+                if ext.lower() in ['.shp', '.gpkg', '.csv']:
+                    cleaned_files[safe_name] = target_path
+            
+            # 2. Iterate through the safely named files
+            for safe_name, target_path in cleaned_files.items():
+                try:
+                    if safe_name.endswith('.csv'):
+                        df = pd.read_csv(target_path)
+                        df.columns = map(str.lower, df.columns)
+                        if 'wkt_geom' in df.columns:
+                            gdf = gpd.GeoDataFrame(df, geometry=gpd.GeoSeries.from_wkt(df['wkt_geom']), crs="EPSG:4326")
                         else:
-                            df = gpd.read_file(target_path)
-                            df.columns = map(str.lower, df.columns)
-                            # Handle case where shapefile text column holds WKT coordinates
-                            if 'wkt_geom' in df.columns:
-                                gdf = gpd.GeoDataFrame(df, geometry=gpd.GeoSeries.from_wkt(df['wkt_geom']), crs="EPSG:4326")
-                            else:
-                                gdf = df
+                            continue
+                    else:
+                        # GDAL will now successfully find "features_polygon.shx" right next to "features_polygon.shp"
+                        df = gpd.read_file(target_path)
+                        df.columns = map(str.lower, df.columns)
+                        if 'wkt_geom' in df.columns:
+                            gdf = gpd.GeoDataFrame(df, geometry=gpd.GeoSeries.from_wkt(df['wkt_geom']), crs="EPSG:4326")
+                        else:
+                            gdf = df
+                    
+                    gdf = gdf.to_crs(27700)
+                    
+                    # Ensure columns exist before slicing to prevent KeyErrors
+                    available_cols = ['species', 'geometry']
+                    if 'date' in gdf.columns:
+                        available_cols.append('date')
                         
-                        gdf = gdf.to_crs(27700)
-                        gdfs.append(gdf[['species', 'date', 'geometry'] if 'date' in gdf.columns else ['species', 'geometry']])
-                    except Exception as e:
-                        st.warning(f"Failed to process sub-component layer {f.name}: {e}")
+                    gdfs.append(gdf[available_cols])
+                except Exception as e:
+                    st.warning(f"Failed to process sub-component layer {safe_name}: {e}")
             
             if len(gdfs) == 0:
                 st.error("No compatible point, line, or polygon shapes could be derived from input assets.")
