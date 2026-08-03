@@ -48,16 +48,45 @@ with st.sidebar:
     run_btn = st.button("Run Analysis", type="primary", use_container_width=True)
 
 # --- 3. UI TABS ---
-tab_guide, tab_engine = st.tabs(["Quick Guide", "Analytics Hub"])
+tab_how, tab_results, tab_strategy, tab_hub = st.tabs([
+    "📖 How to Use", 
+    "📊 Understanding Results", 
+    "🎯 Catchment Strategy", 
+    "⚙️ Analytics Hub"
+])
 
-with tab_guide:
+with tab_how:
     st.markdown("""
-    ### Action Tiers Reference
-    * **Tier 1 (Alpha Source):** Active infestations with NO upstream sources. **Highest Priority.**
-    * **Tier 2:** Infested reaches with exactly ONE upstream source. 
-    * **Tier 3 & 4:** Severely pressured reaches with multiple upstream sources.
-    * **Tier 5 (Clean):** Uninfested reaches. No remediation needed.
-    * **Critical Protectors:** Clean reaches immediately downstream of an infestation. Monitor closely.
+    ### Quick Start Guide
+    1. **Upload Data (Optional):** Use the sidebar to upload a custom river network or INNS records. If left blank, the tool uses default templates.
+    2. **Set Parameters:**
+        * **Segment Length:** Breaks long rivers into manageable work blocks (e.g., 1000m stretches).
+        * **Buffer Search:** How far from the river bank to look for species records (accounts for GPS inaccuracy).
+        * **Baseline Year:** Filters out outdated historical records.
+    3. **Select Target:** Pick the specific invasive species you want to model.
+    4. **Run Engine:** Navigate to the **⚙️ Analytics Hub** tab and click 'Run Analysis' in the sidebar.
+    """)
+
+with tab_results:
+    st.markdown("""
+    ### GIS Export Dictionary
+    When you import the output `.gpkg` into QGIS or ArcGIS, style your layers using these generated attributes:
+    * **`_tier` (Action Priority):** 1 to 5. Color-code these to easily see your primary targets (Tier 1) vs safe zones (Tier 5).
+    * **`_cnt` (Record Count):** The number of actual survey observations that fell within this river segment.
+    * **`_risk_km` (Downstream Risk):** For Tier 1 reaches, this shows how many kilometers of clean river are at immediate risk below it.
+    * **`_protector` (Shield Flag):** A `1` means this clean segment sits directly below an infestation. Monitor these closely.
+    """)
+
+with tab_strategy:
+    st.markdown("""
+    ### How to Treat INNS Effectively
+    Invasive species spread via water flow. Treating downstream populations while upstream sources remain active is a waste of time and budget, as floods will simply re-infest the cleared areas. 
+
+    **Follow the Top-Down Approach:**
+    * **Target Tier 1 First:** These are "Alpha Sources"—infestations at the very top of the catchment with *no* upstream sources. Eradicating these cuts off the seed supply.
+    * **Move to Tier 2:** Once Tier 1 is cleared, Tier 2 segments (which only had one upstream source) become the new Tier 1s.
+    * **Ignore Tiers 3 & 4 (For Now):** These are heavily pressured mid-to-lower catchment areas. Do not spend treatment budget here until the upper catchment is under control.
+    * **Defend Protectors:** Deploy monitoring teams to "Protector" reaches to ensure infestations haven't spread into clean corridors.
     """)
 
 # --- 4. ENGINE LOGIC ---
@@ -67,7 +96,7 @@ def split_line(line, max_dist):
     length = line.length / n
     return [substring(line, i * length, (i + 1) * length) for i in range(n)]
 
-with tab_engine:
+with tab_hub:
     if run_btn:
         if not up_river and not os.path.exists(RIVER_TMPL): st.error("Missing River Network data."); st.stop()
         if not up_inns and not os.path.exists(INNS_TMPL): st.error("Missing INNS data."); st.stop()
@@ -176,4 +205,4 @@ with tab_engine:
             smry['Action'] = smry['Tier'].map({1: "Alpha Source", 2: "Secondary", 3: "Mid-Catchment", 4: "Terminal", 5: "Clean"})
             st.dataframe(smry, hide_index=True, use_container_width=True)
     elif not run_btn:
-        st.info("Configure parameters and run the analysis to view results.")
+        st.info("Configure parameters in the sidebar and run the analysis to view results.")
