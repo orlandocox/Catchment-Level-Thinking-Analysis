@@ -7,6 +7,8 @@ import os
 import zipfile
 import io
 import gc
+import folium
+from streamlit_folium import st_folium
 from datetime import datetime
 from shapely.ops import substring
 
@@ -185,24 +187,75 @@ with tab_hub:
             
             st.session_state.update({
                 'res': rvrs, 'bytes': mem_buf.getvalue(), 'fname': out_name, 
-                'spec': TARGET_SPECIES, 'cols': (c_tier, c_prt)
+                'spec': TARGET_SPECIES, 'cols': (c_tier, c_prt, c_cnt)
             })
 
-    # --- 5. RESULTS UI ---
+    # --- 5. RESULTS UI & MAPPING ---
     if 'res' in st.session_state:
-        df, t_col, p_col = st.session_state['res'], st.session_state['cols'][0], st.session_state['cols'][1]
+        df = st.session_state['res']
+        t_col, p_col, cnt_col = st.session_state['cols']
         
         st.success("Analysis Complete.")
-        st.download_button("Download Output GeoPackage (.gpkg)", data=st.session_state['bytes'], file_name=st.session_state['fname'], type="primary")
         
-        c1, c2 = st.columns([1, 2])
+        # Top Metrics
+        c1, c2, c3 = st.columns([1, 1, 1])
         with c1:
-            st.metric("Priority 1 Targets", f"{len(df[df[t_col] == 1])}")
-            st.metric("Clean Protectors", f"{int(df[p_col].sum())}")
+            st.metric("Priority 1 Targets (Alpha Sources)", f"{len(df[df[t_col] == 1])}")
         with c2:
-            smry = df[t_col].value_counts().sort_index().reset_index()
-            smry.columns = ['Tier', 'Segments']
-            smry['Action'] = smry['Tier'].map({1: "Alpha Source", 2: "Secondary", 3: "Mid-Catchment", 4: "Terminal", 5: "Clean"})
-            st.dataframe(smry, hide_index=True, use_container_width=True)
+            st.metric("Clean Protectors At Risk", f"{int(df[p_col].sum())}")
+        with c3:
+            st.download_button("📥 Download GIS Data (.gpkg)", data=st.session_state['bytes'], file_name=st.session_state['fname'], type="primary", use_container_width=True)
+
+        st.divider()
+
+        # Generate Folium Map
+        st.subheader("Interactive Catchment Prioritisation Map")
+        with st.spinner("Generating interactive map..."):
+            # Web maps require WGS84 (Lat/Lon) projection
+            df_map = df.to_crs(4326).copy()
+            
+            # Map styling logic based on Action Tiers
+            def get_style(feature):
+                tier = feature['properties'][t_col]
+                color = '#1E90FF'  # Tier 5 (Clean) - Dodger Blue
+                weight = 1
+                
+                if tier == 1: 
+                    color = '#FF0000' # Tier 1 - Red
+                    weight = 4
+                elif tier == 2:
+                    color = '#FF8C00' # Tier 2 - Dark Orange
+                    weight = 3
+                elif tier in [3, 4]:
+                    color = '#FFD700' # Tiers 3 & 4 - Gold/Yellow
+                    weight = 2
+                    
+                return {'color': color, 'weight': weight, 'opacity': 0.8}
+
+            # Center map on the data bounding box
+            bounds = df_map.total_bounds # [minx, miny, maxx, maxy]
+            m = folium.Map(location=[(bounds[1] + bounds[3])/2, (bounds[0] + bounds[2])/2], zoom_start=11, tiles="CartoDB positron")
+            
+            # Add GeoJson to map with tooltips
+            folium.GeoJson(
+                df_map,
+                style_function=get_style,
+                tooltip=folium.GeoJsonTooltip(
+                    fields=[t_col, cnt_col, p_col], 
+                    aliases=['Action Tier:', 'Record Count:', 'Protector Flag:'],
+                    localize=True
+                )
+            ).add_to(m)
+            
+            # Render in Streamlit
+            st_folium(m, use_container_width=True, height=500, returned_objects=[])
+
+        # Summary Table
+        st.subheader("Segment Summary")
+        smry = df[t_col].value_counts().sort_index().reset_index()
+        smry.columns = ['Tier', 'Segments']
+        smry['Action'] = smry['Tier'].map({1: "Alpha Source", 2: "Secondary", 3: "Mid-Catchment", 4: "Terminal", 5: "Clean"})
+        st.dataframe(smry, hide_index=True, use_container_width=True)
+        
     elif not run_btn:
-        st.info("Configure parameters in the sidebar and run the analysis to view results.")
+        st.info("Configure parameters in the sidebar and click 'Run Analysis' to view results.")
