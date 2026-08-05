@@ -5,9 +5,8 @@ import pandas as pd
 import numpy as np
 import os
 import zipfile
+import io
 import gc
-import folium
-from streamlit_folium import st_folium
 from datetime import datetime
 from shapely.ops import substring
 
@@ -59,13 +58,13 @@ tab_how, tab_results, tab_strategy, tab_hub = st.tabs([
 with tab_how:
     st.markdown("""
     ### Quick Start Guide
-    1. **Upload Data (Optional):** Use the sidebar to upload a custom river network or INNS records. If left blank, default templates are used.
+    1. **Upload Data (Optional):** Use the sidebar to upload a custom river network or INNS records. If left blank, the tool uses default templates.
     2. **Set Parameters:**
         * **Segment Length:** Breaks long rivers into manageable work blocks (e.g., 1000m stretches).
-        * **Buffer Search:** How far from the river bank to search for species records (accounts for GPS inaccuracy).
+        * **Buffer Search:** How far from the river bank to look for species records (accounts for GPS inaccuracy).
         * **Baseline Year:** Filters out outdated historical records.
     3. **Select Target:** Pick the specific invasive species you want to model.
-    4. **Run Engine:** Click **Run Analysis** in the sidebar.
+    4. **Run Engine:** Navigate to the **⚙️ Analytics Hub** tab and click 'Run Analysis' in the sidebar.
     """)
 
 with tab_results:
@@ -81,12 +80,12 @@ with tab_results:
 with tab_strategy:
     st.markdown("""
     ### How to Treat INNS Effectively
-    Invasive species spread via water flow. Treating downstream populations while upstream sources remain active is ineffective as floods will re-infest cleared areas. 
+    Invasive species spread via water flow. Treating downstream populations while upstream sources remain active is a waste of time and budget, as floods will simply re-infest the cleared areas. 
 
     **Follow the Top-Down Approach:**
-    * **Target Tier 1 First:** These are "Alpha Sources"—infestations at the very top of the catchment with *no* upstream sources. Eradicating these cuts off seed supply.
-    * **Move to Tier 2:** Once Tier 1 is cleared, Tier 2 segments become the new Tier 1s.
-    * **Ignore Tiers 3 & 4 (For Now):** These are heavily pressured mid-to-lower catchment areas. Do not spend budget here until upper catchments are under control.
+    * **Target Tier 1 First:** These are "Alpha Sources"—infestations at the very top of the catchment with *no* upstream sources. Eradicating these cuts off the seed supply.
+    * **Move to Tier 2:** Once Tier 1 is cleared, Tier 2 segments (which only had one upstream source) become the new Tier 1s.
+    * **Ignore Tiers 3 & 4 (For Now):** These are heavily pressured mid-to-lower catchment areas. Do not spend treatment budget here until the upper catchment is under control.
     * **Defend Protectors:** Deploy monitoring teams to "Protector" reaches to ensure infestations haven't spread into clean corridors.
     """)
 
@@ -175,92 +174,35 @@ with tab_hub:
                 if rvrs.at[idx, 'fn'] in G and any(d['i_cnt'] > 0 for _, _, d in G.in_edges(rvrs.at[idx, 'fn'], data=True)):
                     rvrs.at[idx, c_prt] = 1
 
-            # F. Disk Export & Session State
+            # F. Export & Session State
             out_name = f"Strategy_{pfx}_{YEAR_FILTER}.gpkg"
-            out_dir = os.path.join("Output_Data", datetime.now().strftime("%Y-%m-%d_%H-%M"))
-            os.makedirs(out_dir, exist_ok=True)
-            out_path = os.path.join(out_dir, out_name)
-            
-            # Export to file directly to avoid memory warnings/spikes
+            out_path = os.path.join("Output_Data", datetime.now().strftime("%Y-%m-%d_%H-%M"), out_name)
+            os.makedirs(os.path.dirname(out_path), exist_ok=True)
             rvrs.to_file(out_path, driver="GPKG")
+
+            mem_buf = io.BytesIO()
+            rvrs.to_file(mem_buf, driver="GPKG")
             
             st.session_state.update({
-                'res': rvrs, 'out_path': out_path, 'fname': out_name, 
-                'spec': TARGET_SPECIES, 'cols': (c_tier, c_prt, c_cnt)
+                'res': rvrs, 'bytes': mem_buf.getvalue(), 'fname': out_name, 
+                'spec': TARGET_SPECIES, 'cols': (c_tier, c_prt)
             })
 
-    # --- 5. RESULTS UI & OPTIMIZED MAPPING ---
+    # --- 5. RESULTS UI ---
     if 'res' in st.session_state:
-        df = st.session_state['res']
-        t_col, p_col, cnt_col = st.session_state['cols']
+        df, t_col, p_col = st.session_state['res'], st.session_state['cols'][0], st.session_state['cols'][1]
         
         st.success("Analysis Complete.")
+        st.download_button("Download Output GeoPackage (.gpkg)", data=st.session_state['bytes'], file_name=st.session_state['fname'], type="primary")
         
-        # Top Metrics
-        c1, c2, c3 = st.columns([1, 1, 1])
+        c1, c2 = st.columns([1, 2])
         with c1:
-            st.metric("Priority 1 Targets (Alpha Sources)", f"{len(df[df[t_col] == 1])}")
+            st.metric("Priority 1 Targets", f"{len(df[df[t_col] == 1])}")
+            st.metric("Clean Protectors", f"{int(df[p_col].sum())}")
         with c2:
-            st.metric("Clean Protectors At Risk", f"{int(df[p_col].sum())}")
-        with c3:
-            with open(st.session_state['out_path'], "rb") as f:
-                st.download_button(
-                    "📥 Download GIS Data (.gpkg)", 
-                    data=f.read(), 
-                    file_name=st.session_state['fname'], 
-                    type="primary", 
-                    use_container_width=True
-                )
-
-        st.divider()
-
-        # Generate Folium Map (Lightweight)
-        st.subheader("Interactive Catchment Prioritisation Map")
-        with st.spinner("Optimizing map layers..."):
-            # 1. Project to Lat/Lon
-            df_map = df.to_crs(4326).copy()
-            
-            # 2. SIMPLIFY GEOMETRY: Massive memory saver for Folium rendering
-            df_map['geometry'] = df_map.geometry.simplify(0.0002, preserve_topology=True)
-            
-            # 3. Select strictly required columns for rendering
-            df_map = df_map[[t_col, cnt_col, p_col, 'geometry']]
-            
-            def get_style(feature):
-                tier = feature['properties'][t_col]
-                if tier == 1: 
-                    return {'color': '#FF0000', 'weight': 4, 'opacity': 0.9} # Tier 1 - Red
-                elif tier == 2:
-                    return {'color': '#FF8C00', 'weight': 3, 'opacity': 0.85} # Tier 2 - Orange
-                elif tier in [3, 4]:
-                    return {'color': '#FFD700', 'weight': 2, 'opacity': 0.75} # Tiers 3/4 - Yellow
-                return {'color': '#1E90FF', 'weight': 1, 'opacity': 0.4} # Tier 5 - Blue
-
-            bounds = df_map.total_bounds
-            m = folium.Map(
-                location=[(bounds[1] + bounds[3])/2, (bounds[0] + bounds[2])/2], 
-                zoom_start=11, 
-                tiles="CartoDB positron"
-            )
-            
-            folium.GeoJson(
-                df_map,
-                style_function=get_style,
-                tooltip=folium.GeoJsonTooltip(
-                    fields=[t_col, cnt_col, p_col], 
-                    aliases=['Action Tier:', 'Record Count:', 'Protector Flag:'],
-                    localize=True
-                )
-            ).add_to(m)
-            
-            st_folium(m, use_container_width=True, height=500, returned_objects=[])
-
-        # Summary Table
-        st.subheader("Segment Summary")
-        smry = df[t_col].value_counts().sort_index().reset_index()
-        smry.columns = ['Tier', 'Segments']
-        smry['Action'] = smry['Tier'].map({1: "Alpha Source", 2: "Secondary", 3: "Mid-Catchment", 4: "Terminal", 5: "Clean"})
-        st.dataframe(smry, hide_index=True, use_container_width=True)
-        
+            smry = df[t_col].value_counts().sort_index().reset_index()
+            smry.columns = ['Tier', 'Segments']
+            smry['Action'] = smry['Tier'].map({1: "Alpha Source", 2: "Secondary", 3: "Mid-Catchment", 4: "Terminal", 5: "Clean"})
+            st.dataframe(smry, hide_index=True, use_container_width=True)
     elif not run_btn:
-        st.info("Configure parameters in the sidebar and click 'Run Analysis' to view results.")
+        st.info("Configure parameters in the sidebar and run the analysis to view results.")
